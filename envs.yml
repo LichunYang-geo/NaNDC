@@ -1,0 +1,15 @@
+name: nandc
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python
+  - numpy
+  - pandas
+  - xarray
+  - tqdm
+  - matplotlib
+  - pip
+  - pip:
+    - obspy==1.4.0
+    - pyrocko==2023.10.11

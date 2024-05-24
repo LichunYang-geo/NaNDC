@@ -1,0 +1,104 @@
+#!/bin/bash -e
+
+
+# Plot misfit variation on eigenvalue lune 
+# Modified from mtuq https://github.com/uafgeotools/mtuq/blob/master/mtuq/graphics/uq/_gmt/plot_lune
+# Writtern by Lichun Yang 04/08/2024
+
+# add NaNDC/graphics/_gmt to the path
+export PATH=${PATH:+${PATH}:}$(dirname ${BASH_SOURCE[0]})
+# parse input arguments
+if [ $# -lt 11 ] ; then
+    echo "plot_lune: bad input arguments"
+    exit -1
+fi
+
+# output file
+filename=$1
+filetype=$2
+
+# ASCII input files
+ascii_data=$3
+supplemental_data=$4
+
+# colorbar
+value_min=$5
+value_max=$6
+cpt_step=$7
+cpt_name=$8
+flip_cpt=$9
+
+# markers
+marker_coords=${10}
+
+# contour lines
+contours=${11}
+
+proj_arg="-JH0/3.4i"
+area_arg="-R-30/30/-90/90"
+
+gmt gmtset FONT_ANNOT 15p
+gmt gmtset FONT_LABEL 15p
+gmt gmtset FORMAT_GEO_MAP ddd.x
+gmt gmtset MAP_FRAME_TYPE plain
+gmt gmtset PROJ_LENGTH_UNIT i # inch
+gmt gmtset PS_CHAR_ENCODING Standard+
+gmt gmtset PS_MEDIA letter
+gmt gmtset PS_PAGE_ORIENTATION portrait
+    
+gmt begin $filename tiff E600
+
+gmt psbasemap $proj_arg $area_arg -Bf0g10 --MAP_GRID_PEN_PRIMARY=0.25p,lightgray --MAP_FRAME_PEN=0.5p
+
+# generate color palette
+if [ $flip_cpt -ne 0 ]; then 
+    cpt_args="-C${cpt_name} -Ic"
+else
+    cpt_args="-C${cpt_name}"
+fi
+range_arg="-T${value_min}/${value_max}/${cpt_step}"
+gmt makecpt $cpt_args -D $range_arg
+
+# plot misfit values
+gmt pscontour $ascii_data $proj_arg $area_arg -C -I
+
+# add_lune_arcs
+(echo -30  35.2644 ; echo 30  54.7356) | gmt psxy -N -W2p,0/0/0/35 $proj_arg $area_arg
+(echo -30 -54.7356 ; echo 30 -35.2644) | gmt psxy -N -W2p,0/0/0/35 $proj_arg $area_arg
+(echo -30  35.2644 ; echo 30 -35.2644) | gmt psxy -N -W2p,0/0/0/35 $proj_arg $area_arg
+
+# gmt pscontour $ascii_data $proj_arg $area_arg -A$contours+apu+f12p,black+gwhite -Wa1.5p,white
+gmt pscontour $ascii_data $proj_arg $area_arg -C$contours -Wc1.5p,white
+
+# plot focal mechanism tradeoffs
+if [ -f $supplemental_data ]; then
+    gmt psmeca $supplemental_data $proj_arg $area_arg -N -Sm0.2 -C
+fi
+
+# plot markers
+if [ -f $marker_coords ]; then
+    lon=$(cat $marker_coords | awk '{print $1}')
+    lat=$(cat $marker_coords | awk '{print $2}')
+    echo "$lon $lat" | gmt psxy -N -S+20p -W5p,yellow $proj_arg $area_arg
+
+fi
+
+# add_lune_labels
+echo   0.0 -90.0  ISO | gmt pstext -F+f14p+jCB -N $proj_arg $area_arg -D0p/-35p
+echo   0.0  90.0  ISO | gmt pstext -F+f14p+jCB -N $proj_arg $area_arg -D0p/25p
+echo -30.0   0.0 CLVD | gmt pstext -F+f14p+jRM -N $proj_arg $area_arg -D-10p/-15p
+echo  30.0   0.0 CLVD | gmt pstext -F+f14p+jLM -N $proj_arg $area_arg -D10p/-15p
+echo "  0.0 -90.0000 (-1,-1,-1)" | gmt pstext -F+f12p+jCT -N $proj_arg $area_arg -D0p/-10p
+echo "-30.0   0.0000 (2,-1,-1)"  | gmt pstext -F+f12p+jRM -N $proj_arg $area_arg -D-10p/0p
+echo "-30.0  35.2644 (1,0,0)"    | gmt pstext -F+f12p+jRM -N $proj_arg $area_arg -D-10p/0p
+echo "  0.0  90.0000 (1,1,1)"    | gmt pstext -F+f12p+jCB -N $proj_arg $area_arg -D0p/10p
+echo " 30.0  54.7356 (1,1,0)"    | gmt pstext -F+f12p+jLM -N $proj_arg $area_arg -D10p/0p
+echo " 30.0   0.0000 (1,1,-2)"   | gmt pstext -F+f12p+jLM -N $proj_arg $area_arg -D10p/0p
+echo " 30.0 -35.2644 (0,0,-1)"   | gmt pstext -F+f12p+jLM -N $proj_arg $area_arg -D10p/0p
+echo "-30.0 -54.7356 (0,-1,-1)"  | gmt pstext -F+f12p+jRM -N $proj_arg $area_arg -D-10p/0p
+
+# display colorbar
+gmt colorbar -DjBR+w2.4/0.2+o-3c/0c+ebf+ma+v -Bx+l"misfit value"
+
+gmt end
+rm tmp*.txt
