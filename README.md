@@ -1,2 +1,2 @@
 # NaNDC - Nodal Array Non Double Couple
-The new version of NaNDC will be updated at the end of December.
+The v0.1.0 of NaNDC will be released at the end of December.
