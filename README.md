@@ -5,5 +5,10 @@ NaNDC is a full moment tensor inversion package for small earthquakes monitored 
 
 ## Quick Installation
 The NaNDC can be installed by conda:
-conda env create -f envs.yml
-conda activate nandc
+
+
+`conda env create -f envs.yml`
+
+Then activate codna environment:
+
+`conda activate nandc`
