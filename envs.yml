@@ -2,18 +2,16 @@ name: nandc
 channels:
   - conda-forge
   - defaults
+  - pyrocko
 dependencies:
-  - python=3.12
-  - gmt=6.5
-  - packaging=24.1
+  - python=3.11
   - numpy=1.26
-  - pandas=2.1
-  - xarray=2023.10.1
-  - netcdf4=1.7.1
+  - obspy=1.4.1
+  - pyrocko=2025.01.21
   - tqdm=4.66.1
-  - matplotlib=3.8
-  - pip
-  - pip:
-    - pygmt
-    - obspy
-    - pyrocko
+  - gmt=6.5
+  - pandas=2.2.2
+  - xarray=2025.1.2
+  - packaging=24.1
+  - netcdf4=1.7.1
+  - pygmt=0.14.2
