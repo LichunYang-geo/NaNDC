@@ -1,0 +1,20 @@
+name: nandc
+channels:
+  - conda-forge
+  - pyrocko
+dependencies:
+  - python=3.14.3
+  - numpy=2.4.3
+  - pandas=3.0.1
+  - obspy=1.5.0
+  - xarray=2026.2.0
+  - tqdm=4.67.3
+  - joblib=1.5.3
+  - matplotlib=3.10.8
+  - pygmt=0.18.0
+  - scipy=1.17.1
+  - gmt=6.6.0
+  - pyrocko=2025.12.04
+
+# conda env create -f environment.yml
+# conda activate nandc
