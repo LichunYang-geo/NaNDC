@@ -1,5 +1,7 @@
 import numpy as np
 
+from joblib import Parallel, delayed
+
 from nandc_mt import tt_to_mij, get_full_MT_array
 
 
@@ -308,6 +310,81 @@ def _pairwise_omega_matrix(mts):
     return omega
 
 
+def _mts_to_unit_flat(mts):
+    mts = np.asarray(mts, dtype=np.float64)
+    if mts.ndim != 2 or mts.shape[1] != 6:
+        raise ValueError("`mts` must be a 2-D array with shape (N, 6)")
+
+    n_model = mts.shape[0]
+    full_mts = np.stack([get_full_MT_array(mt) for mt in mts], axis=0)
+    flat_mts = full_mts.reshape(n_model, -1)
+    norms = np.linalg.norm(flat_mts, axis=1)
+    valid_norm = norms > 0.0
+    unit_flat = np.divide(
+        flat_mts,
+        norms[:, None],
+        out=np.zeros_like(flat_mts),
+        where=valid_norm[:, None],
+    )
+    return unit_flat, valid_norm
+
+
+def _block_row_min_cos(unit_flat, valid_norm, block_index, block_size):
+    n_model = unit_flat.shape[0]
+    i0 = block_index * block_size
+    i1 = min(i0 + block_size, n_model)
+    row_min_cos = 1.0
+
+    for j0 in range(i0, n_model, block_size):
+        j1 = min(j0 + block_size, n_model)
+        cosom = unit_flat[i0:i1] @ unit_flat[j0:j1].T
+
+        valid_i = valid_norm[i0:i1]
+        valid_j = valid_norm[j0:j1]
+        if not (np.all(valid_i) and np.all(valid_j)):
+            valid_pair = valid_i[:, None] & valid_j[None, :]
+            np.putmask(cosom, ~valid_pair, 1.0)
+
+        np.clip(cosom, -1.0, 1.0, out=cosom)
+        if i0 == j0:
+            np.fill_diagonal(cosom, 1.0)
+
+        row_min_cos = min(row_min_cos, float(np.nanmin(cosom)))
+
+    return row_min_cos
+
+
+def _max_pairwise_omega_blocked(mts, *, block_size=2048, n_jobs=1):
+    mts = np.asarray(mts, dtype=np.float64)
+    if mts.ndim != 2 or mts.shape[1] != 6:
+        raise ValueError("`mts` must be a 2-D array with shape (N, 6)")
+
+    n_model = mts.shape[0]
+    if n_model == 0:
+        return np.nan
+    if n_model == 1:
+        return 0.0
+
+    block_size = _validate_positive_int("block_size", block_size)
+    n_jobs = _validate_positive_int("n_jobs", n_jobs)
+    unit_flat, valid_norm = _mts_to_unit_flat(mts)
+    n_blocks = int(np.ceil(n_model / block_size))
+
+    if n_jobs == 1:
+        row_min_cos = [
+            _block_row_min_cos(unit_flat, valid_norm, block_index, block_size)
+            for block_index in range(n_blocks)
+        ]
+    else:
+        row_min_cos = Parallel(n_jobs=n_jobs, backend="threading")(
+            delayed(_block_row_min_cos)(unit_flat, valid_norm, block_index, block_size)
+            for block_index in range(n_blocks)
+        )
+
+    min_cos = float(np.nanmin(row_min_cos))
+    return float(np.rad2deg(np.arccos(np.clip(min_cos, -1.0, 1.0))))
+
+
 def evaluate_sharpness(
     result_table,
     *,
@@ -369,6 +446,8 @@ def evaluate_consistency(
     near_optimal_ratio=0.05,
     max_angle_deg_a=20.0,
     max_angle_deg_b=30.0,
+    pairwise_block_size=2048,
+    n_jobs=1,
 ):
     near_optimal_ratio = _validate_nonnegative("near_optimal_ratio", near_optimal_ratio)
     max_angle_deg_a = _validate_nonnegative("max_angle_deg_a", max_angle_deg_a)
@@ -384,8 +463,11 @@ def evaluate_consistency(
         max_pairwise_omega_deg = np.nan
         grade = "C"
     else:
-        omega_pairwise = _pairwise_omega_matrix(subset_mt)
-        max_pairwise_omega_deg = float(np.nanmax(omega_pairwise))
+        max_pairwise_omega_deg = _max_pairwise_omega_blocked(
+            subset_mt,
+            block_size=pairwise_block_size,
+            n_jobs=n_jobs,
+        )
         if max_pairwise_omega_deg <= max_angle_deg_a:
             grade = "A"
         elif max_pairwise_omega_deg <= max_angle_deg_b:
@@ -479,6 +561,7 @@ def evaluate_solution_quality(
     grid=None,
     misfit_all=None,
     result_table=None,
+    consistency_n_jobs=1,
 ):
     """
     Evaluate inversion quality for one event using the unified result-table format.
@@ -529,6 +612,7 @@ def evaluate_solution_quality(
         near_optimal_ratio=consistency_config["near_optimal_ratio"],
         max_angle_deg_a=consistency_config["A"]["max_angle_deg"],
         max_angle_deg_b=consistency_config["B"]["max_angle_deg"],
+        n_jobs=consistency_n_jobs,
     )
 
     coverage_grade = grade_coverage(coverage)
@@ -570,7 +654,7 @@ def evaluate_solution_quality(
     }
 
 
-def evaluate_quality_from_grid(event, weight_list, best_misfit_row, grid, misfit_all):
+def evaluate_quality_from_grid(event, weight_list, best_misfit_row, grid, misfit_all, consistency_n_jobs=1):
     """
     Convenience wrapper for DC/FMT-style workflows.
 
@@ -588,10 +672,11 @@ def evaluate_quality_from_grid(event, weight_list, best_misfit_row, grid, misfit
         best_misfit_row,
         grid=grid,
         misfit_all=misfit_all,
+        consistency_n_jobs=consistency_n_jobs,
     )
 
 
-def evaluate_quality_from_table(event, weight_list, best_misfit_row, result_table):
+def evaluate_quality_from_table(event, weight_list, best_misfit_row, result_table, consistency_n_jobs=1):
     """
     Convenience wrapper for workflows that already produce a result table.
 
@@ -607,4 +692,5 @@ def evaluate_quality_from_table(event, weight_list, best_misfit_row, result_tabl
         weight_list,
         best_misfit_row,
         result_table=result_table,
+        consistency_n_jobs=consistency_n_jobs,
     )

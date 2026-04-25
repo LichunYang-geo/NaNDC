@@ -224,6 +224,7 @@ def nandc_inv_main(args, event):
             best_misfit_row=misfit_fmt[min_misfit_fmt_index],
             grid=grid_fmt,
             misfit_all=misfit_fmt,
+            consistency_n_jobs=args.n_jobs,
         )
 
         # ------------------------------------- 保存结果 ---------------------------------------- #
@@ -264,6 +265,7 @@ def nandc_inv_main(args, event):
             best_misfit_row=misfit_dc[min_misfit_dc_index],
             grid=grid_dc,
             misfit_all=misfit_dc,
+            consistency_n_jobs=args.n_jobs,
         )
         # ------------------------------------- 保存结果 ---------------------------------------- #
         flog.write(build_result_log_section("DC", magnitude, misfit_dc[min_misfit_dc_index]))
@@ -316,6 +318,7 @@ def nandc_inv_main(args, event):
             weight_list=weight_list,
             best_misfit_row=misfit_fmt[min_misfit_fmt_index],
             result_table=result_table_fmt,
+            consistency_n_jobs=args.n_jobs,
         )
         
         write_results(savepath, event, mt_best_fmt, magnitude, misfit_fmt[min_misfit_fmt_index, 0], weight_list)
