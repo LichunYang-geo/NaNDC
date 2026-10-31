@@ -234,14 +234,15 @@ def nandc_inv_main(args, event):
         write_file_lune(savepath, event.evid+'_lune.txt', tts_lune) # tts_lune[:, 6]这一列是误差
 
         # ------------------------------------- 绘图 ---------------------------------------- #
-        # beachball
-        plot_results_beachball(savepath, args, event, weight_list, mt_best_fmt)
+        if not args.no_plot:
+            # beachball
+            plot_results_beachball(savepath, args, event, weight_list, mt_best_fmt)
 
-        #  lune plot
-        best_gamma, best_delta = mt_to_gamma_delta(mt_best_fmt)
-        misfit_lune = np.column_stack([v_to_gamma(tts_lune[:, 1]), w_to_delta(tts_lune[:, 2]), tts_lune[:,6]])
-        plot_misfit_lune_pygmt(savepath=savepath, filename=event.evid+'_lune', filetype=args.figtype, 
-                               lune_value=misfit_lune, lune_marker=[best_gamma, best_delta], colormap='no_green')
+            #  lune plot
+            best_gamma, best_delta = mt_to_gamma_delta(mt_best_fmt)
+            misfit_lune = np.column_stack([v_to_gamma(tts_lune[:, 1]), w_to_delta(tts_lune[:, 2]), tts_lune[:,6]])
+            plot_misfit_lune_pygmt(savepath=savepath, filename=event.evid+'_lune', filetype=args.figtype, 
+                                   lune_value=misfit_lune, lune_marker=[best_gamma, best_delta], colormap='no_green')
         
         flog.write(build_quality_log_section(quality))
 
@@ -273,8 +274,9 @@ def nandc_inv_main(args, event):
         write_results(savepath, event, mt_best_dc, magnitude, misfit_dc[min_misfit_dc_index, 0], weight_list)
 
         # # ------------------------------------- 绘图 ---------------------------------------- #
-        # beachball
-        plot_results_beachball(savepath, args, event, weight_list, mt_best_dc)
+        if not args.no_plot:
+            # beachball
+            plot_results_beachball(savepath, args, event, weight_list, mt_best_dc)
 
         flog.write(build_quality_log_section(quality))
 
@@ -324,11 +326,12 @@ def nandc_inv_main(args, event):
         write_results(savepath, event, mt_best_fmt, magnitude, misfit_fmt[min_misfit_fmt_index, 0], weight_list)
         write_file_lune(savepath, event.evid + "_lune.txt", tts_lune)
 
-        plot_results_beachball(savepath, args, event, weight_list, mt_best_fmt)
+        if not args.no_plot:
+            plot_results_beachball(savepath, args, event, weight_list, mt_best_fmt)
 
-        best_gamma, best_delta = mt_to_gamma_delta(mt_best_fmt)
-        misfit_lune = np.column_stack([v_to_gamma(tts_lune[:, 1]), w_to_delta(tts_lune[:, 2]), tts_lune[:, 6]])
-        plot_misfit_lune_pygmt(savepath=savepath, filename=event.evid + "_lune", filetype=args.figtype,lune_value=misfit_lune, lune_marker=[best_gamma, best_delta], colormap="no_green")
+            best_gamma, best_delta = mt_to_gamma_delta(mt_best_fmt)
+            misfit_lune = np.column_stack([v_to_gamma(tts_lune[:, 1]), w_to_delta(tts_lune[:, 2]), tts_lune[:, 6]])
+            plot_misfit_lune_pygmt(savepath=savepath, filename=event.evid + "_lune", filetype=args.figtype,lune_value=misfit_lune, lune_marker=[best_gamma, best_delta], colormap="no_green")
 
         flog.write(build_quality_log_section(quality))
 

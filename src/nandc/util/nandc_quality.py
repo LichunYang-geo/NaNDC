@@ -1,7 +1,5 @@
 import numpy as np
 
-from joblib import Parallel, delayed
-
 from nandc_mt import tt_to_mij, get_full_MT_array
 
 
@@ -10,28 +8,21 @@ DEFAULT_QUALITY_CONFIG = {
         "A": {"max_azi_gap": 90.0, "max_takeoff_gap": 30.0},
         "B": {"max_azi_gap": 135.0, "max_takeoff_gap": 50.0},
     },
-    "count": {
-        "A": {"min_active_each": 15},
-        "B": {"min_active_each": 10},
-    },
     "fit": {
-        "A": {"max_mean_active": 0.20},
-        "B": {"max_mean_active": 0.35},
+        "A": {"max_total": 0.50},
+        "B": {"max_total": 0.80},
     },
-    "sharpness": {
-        "low_error_count": 200,
-        "A": {"min_relative_span": 0.10},
-        "B": {"min_relative_span": 0.05},
-    },
-    "consistency": {
+    "stability": {
         "near_optimal_ratio": 0.05,
-        "A": {"max_angle_deg": 25.0},
-        "B": {"max_angle_deg": 40.0},
+        "misfit_rank_count": 200,
+        "A": {"min_misfit_rank_ratio": 0.10, "max_omega_p95_deg": 25.0},
+        "B": {"min_misfit_rank_ratio": 0.05, "max_omega_p95_deg": 40.0},
     },
 }
 
 
 def _as_misfit_row(best_misfit_row):
+    """Return the first four misfit terms as [total, pol, amp, spr]."""
     row = np.asarray(best_misfit_row, dtype=np.float64).reshape(-1)
     if row.size < 4:
         raise ValueError("`best_misfit_row` must contain at least [total, pol, amp, spr]")
@@ -39,17 +30,11 @@ def _as_misfit_row(best_misfit_row):
 
 
 def _as_weight_list(weight_list):
+    """Return inversion weights as [pol, amp, spr]."""
     weight = np.asarray(weight_list, dtype=np.float64).reshape(-1)
     if weight.size != 3:
         raise ValueError("`weight_list` must contain exactly three values")
     return weight
-
-
-def _validate_fraction(name, value):
-    value = float(value)
-    if not np.isfinite(value) or value <= 0.0 or value > 1.0:
-        raise ValueError(f"`{name}` must be within (0, 1]")
-    return value
 
 
 def _validate_nonnegative(name, value):
@@ -60,21 +45,19 @@ def _validate_nonnegative(name, value):
 
 
 def _validate_positive_int(name, value):
+    """Return a positive integer after rejecting bools and non-integral values."""
     if isinstance(value, bool):
         raise ValueError(f"`{name}` must be a positive integer")
 
-    try:
-        value_float = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"`{name}` must be a positive integer") from exc
-
+    value_float = float(value)
     if not np.isfinite(value_float) or value_float <= 0.0 or not value_float.is_integer():
         raise ValueError(f"`{name}` must be a positive integer")
 
     return int(value_float)
 
 
-def _relative_span(value, reference):
+def _relative_misfit_increase(value, reference):
+    """Return the relative increase from a reference misfit."""
     value = float(value)
     reference = float(reference)
     if reference > 0.0:
@@ -85,6 +68,7 @@ def _relative_span(value, reference):
 
 
 def ensure_effective_gap_stats(event, weight_list):
+    """Ensure effective coverage gaps are available on the event object."""
     _as_weight_list(weight_list)
 
     required_attrs = (
@@ -125,6 +109,7 @@ def ensure_effective_gap_stats(event, weight_list):
 
 
 def build_result_table_from_grid(grid, misfit_all):
+    """Convert a grid-search result into [model parameters, misfit terms]."""
     if grid is None:
         raise ValueError("`grid` must not be None")
 
@@ -149,6 +134,7 @@ def build_result_table_from_grid(grid, misfit_all):
 
 
 def build_result_table_from_table(result_table):
+    """Return the first ten columns of an existing result table."""
     result_table = np.asarray(result_table, dtype=np.float64)
     if result_table.ndim != 2 or result_table.shape[1] < 10:
         raise ValueError("`result_table` must be a 2-D array with at least 10 columns")
@@ -156,6 +142,7 @@ def build_result_table_from_table(result_table):
 
 
 def _build_result_table(grid=None, misfit_all=None, result_table=None):
+    """Build the unified result table from either grid arrays or a table."""
     if result_table is not None:
         return build_result_table_from_table(result_table)
     if grid is not None and misfit_all is not None:
@@ -164,6 +151,7 @@ def _build_result_table(grid=None, misfit_all=None, result_table=None):
 
 
 def _active_component_info(event, weight_list):
+    """Describe which data components are active in the current inversion."""
     weight = _as_weight_list(weight_list)
     component_defs = (
         ("pol", weight[0], len(event.pol)),
@@ -183,6 +171,7 @@ def _active_component_info(event, weight_list):
 
 
 def compute_quality_counts(event, weight_list):
+    """Collect observation counts as diagnostics; counts do not grade quality."""
     component_info = _active_component_info(event, weight_list)
     active_counts = [item["count"] for item in component_info if item["active"]]
 
@@ -199,6 +188,7 @@ def compute_quality_counts(event, weight_list):
 
 
 def compute_quality_coverage(event, weight_list):
+    """Compute geometry-only coverage metrics for active data components."""
     ensure_effective_gap_stats(event, weight_list)
 
     component_info = _active_component_info(event, weight_list)
@@ -226,6 +216,7 @@ def compute_quality_coverage(event, weight_list):
 
 
 def compute_quality_fit(event, weight_list, best_misfit_row):
+    """Compute fit diagnostics from the best total and component misfits."""
     best_row = _as_misfit_row(best_misfit_row)
     component_info = _active_component_info(event, weight_list)
     component_misfits = {
@@ -234,6 +225,7 @@ def compute_quality_fit(event, weight_list, best_misfit_row):
         "spr": float(best_row[3]),
     }
 
+    # Keep the active-component mean as a diagnostic only; grading uses total misfit.
     active_terms = [
         component_misfits[item["name"]]
         for item in component_info
@@ -250,6 +242,7 @@ def compute_quality_fit(event, weight_list, best_misfit_row):
 
 
 def build_relative_misfit_subset(result_table, min_misfit, ratio):
+    """Return models whose total misfit is within a relative tolerance."""
     table = np.asarray(result_table, dtype=np.float64)
     if table.ndim != 2 or table.shape[1] < 10:
         raise ValueError("`result_table` must be a 2-D array with at least 10 columns")
@@ -272,6 +265,7 @@ def build_relative_misfit_subset(result_table, min_misfit, ratio):
 
 
 def _result_table_to_mt(result_table):
+    """Convert result-table Tape parameters into moment tensor vectors."""
     table = np.asarray(result_table, dtype=np.float64)
     if table.ndim != 2 or table.shape[1] < 6:
         raise ValueError("`result_table` must be a 2-D array with at least 6 columns")
@@ -285,32 +279,8 @@ def _result_table_to_mt(result_table):
     )
 
 
-def _pairwise_omega_matrix(mts):
-    mts = np.asarray(mts, dtype=np.float64)
-    if mts.ndim != 2 or mts.shape[1] != 6:
-        raise ValueError("`mts` must be a 2-D array with shape (N, 6)")
-
-    n_model = mts.shape[0]
-    if n_model == 0:
-        return np.empty((0, 0), dtype=np.float64)
-    if n_model == 1:
-        return np.zeros((1, 1), dtype=np.float64)
-
-    full_mts = np.stack([get_full_MT_array(mt) for mt in mts], axis=0)
-    norms = np.linalg.norm(full_mts.reshape(n_model, -1), axis=1)
-    dot = np.tensordot(full_mts, full_mts, axes=([1, 2], [1, 2]))
-
-    denom = norms[:, None] * norms[None, :]
-    with np.errstate(invalid="ignore", divide="ignore"):
-        cosom = np.divide(dot, denom, out=np.ones_like(dot), where=denom > 0)
-
-    cosom = np.clip(cosom, -1.0, 1.0)
-    omega = np.rad2deg(np.arccos(cosom))
-    np.fill_diagonal(omega, 0.0)
-    return omega
-
-
 def _mts_to_unit_flat(mts):
+    """Convert moment tensors to normalized flattened full matrices."""
     mts = np.asarray(mts, dtype=np.float64)
     if mts.ndim != 2 or mts.shape[1] != 6:
         raise ValueError("`mts` must be a 2-D array with shape (N, 6)")
@@ -329,162 +299,95 @@ def _mts_to_unit_flat(mts):
     return unit_flat, valid_norm
 
 
-def _block_row_min_cos(unit_flat, valid_norm, block_index, block_size):
-    n_model = unit_flat.shape[0]
-    i0 = block_index * block_size
-    i1 = min(i0 + block_size, n_model)
-    row_min_cos = 1.0
-
-    for j0 in range(i0, n_model, block_size):
-        j1 = min(j0 + block_size, n_model)
-        cosom = unit_flat[i0:i1] @ unit_flat[j0:j1].T
-
-        valid_i = valid_norm[i0:i1]
-        valid_j = valid_norm[j0:j1]
-        if not (np.all(valid_i) and np.all(valid_j)):
-            valid_pair = valid_i[:, None] & valid_j[None, :]
-            np.putmask(cosom, ~valid_pair, 1.0)
-
-        np.clip(cosom, -1.0, 1.0, out=cosom)
-        if i0 == j0:
-            np.fill_diagonal(cosom, 1.0)
-
-        row_min_cos = min(row_min_cos, float(np.nanmin(cosom)))
-
-    return row_min_cos
-
-
-def _max_pairwise_omega_blocked(mts, *, block_size=2048, n_jobs=1):
+def _omega_to_reference_deg(mts, reference_mt):
+    """Compute omega angles from each moment tensor to one reference tensor."""
     mts = np.asarray(mts, dtype=np.float64)
+    reference_mt = np.asarray(reference_mt, dtype=np.float64).reshape(1, 6)
     if mts.ndim != 2 or mts.shape[1] != 6:
         raise ValueError("`mts` must be a 2-D array with shape (N, 6)")
 
-    n_model = mts.shape[0]
-    if n_model == 0:
-        return np.nan
-    if n_model == 1:
-        return 0.0
+    if mts.shape[0] == 0:
+        return np.empty(0, dtype=np.float64)
 
-    block_size = _validate_positive_int("block_size", block_size)
-    n_jobs = _validate_positive_int("n_jobs", n_jobs)
     unit_flat, valid_norm = _mts_to_unit_flat(mts)
-    n_blocks = int(np.ceil(n_model / block_size))
+    reference_unit, reference_valid = _mts_to_unit_flat(reference_mt)
 
-    if n_jobs == 1:
-        row_min_cos = [
-            _block_row_min_cos(unit_flat, valid_norm, block_index, block_size)
-            for block_index in range(n_blocks)
-        ]
-    else:
-        row_min_cos = Parallel(n_jobs=n_jobs, backend="threading")(
-            delayed(_block_row_min_cos)(unit_flat, valid_norm, block_index, block_size)
-            for block_index in range(n_blocks)
-        )
+    if not reference_valid[0]:
+        return np.full(mts.shape[0], np.nan, dtype=np.float64)
 
-    min_cos = float(np.nanmin(row_min_cos))
-    return float(np.rad2deg(np.arccos(np.clip(min_cos, -1.0, 1.0))))
+    # Invalid zero-norm MTs cannot define an angle, so mark them as nan.
+    cosom = unit_flat @ reference_unit[0]
+    cosom = np.clip(cosom, -1.0, 1.0)
+    omega = np.rad2deg(np.arccos(cosom))
+    omega[~valid_norm] = np.nan
+    return omega
 
 
-def evaluate_sharpness(
-    result_table,
-    *,
-    low_error_count=100,
-    min_relative_span_a=0.10,
-    min_relative_span_b=0.05,
-):
-    table = np.asarray(result_table, dtype=np.float64)
-    if table.ndim != 2 or table.shape[1] < 10:
-        raise ValueError("`result_table` must be a 2-D array with at least 10 columns")
-
-    low_error_count = _validate_positive_int("low_error_count", low_error_count)
-    min_relative_span_a = _validate_nonnegative("min_relative_span_a", min_relative_span_a)
-    min_relative_span_b = _validate_nonnegative("min_relative_span_b", min_relative_span_b)
-    if min_relative_span_a < min_relative_span_b:
-        raise ValueError("`min_relative_span_a` must be greater than or equal to `min_relative_span_b`")
-
-    if table.shape[0] == 0:
-        return {
-            "low_error_count": low_error_count,
-            "rank_index": 0,
-            "candidate_count": 0,
-            "misfit_min": np.nan,
-            "misfit_at_rank": np.nan,
-            "relative_span": np.nan,
-            "sharpness_grade": "C",
-        }
-
-    sorted_table = table[np.argsort(table[:, 6])]
-    candidate_count = sorted_table.shape[0]
-    rank_count = min(low_error_count, candidate_count)
-    rank_index = rank_count - 1
-    misfit_min = float(sorted_table[0, 6])
-    misfit_at_rank = float(sorted_table[rank_index, 6])
-    relative_span = _relative_span(misfit_at_rank, misfit_min)
-
-    if relative_span >= min_relative_span_a:
-        grade = "A"
-    elif relative_span >= min_relative_span_b:
-        grade = "B"
-    else:
-        grade = "C"
-
-    return {
-        "low_error_count": int(low_error_count),
-        "rank_index": int(rank_index + 1),
-        "candidate_count": int(candidate_count),
-        "misfit_min": misfit_min,
-        "misfit_at_rank": misfit_at_rank,
-        "relative_span": float(relative_span),
-        "sharpness_grade": grade,
-    }
-
-
-def evaluate_consistency(
+def compute_quality_stability(
     result_table,
     min_misfit,
     *,
     near_optimal_ratio=0.05,
-    max_angle_deg_a=20.0,
-    max_angle_deg_b=30.0,
-    pairwise_block_size=2048,
-    n_jobs=1,
+    misfit_rank_count=200,
 ):
+    """Measure stability from low-error sharpness and mechanism spread."""
+    table = np.asarray(result_table, dtype=np.float64)
+    if table.ndim != 2 or table.shape[1] < 10:
+        raise ValueError("`result_table` must be a 2-D array with at least 10 columns")
+
     near_optimal_ratio = _validate_nonnegative("near_optimal_ratio", near_optimal_ratio)
-    max_angle_deg_a = _validate_nonnegative("max_angle_deg_a", max_angle_deg_a)
-    max_angle_deg_b = _validate_nonnegative("max_angle_deg_b", max_angle_deg_b)
-    if max_angle_deg_a > max_angle_deg_b:
-        raise ValueError("`max_angle_deg_a` must be less than or equal to `max_angle_deg_b`")
+    misfit_rank_count = _validate_positive_int("misfit_rank_count", misfit_rank_count)
+    near_optimal = build_relative_misfit_subset(table, min_misfit, near_optimal_ratio)
+    candidate_count = int(table.shape[0])
+    accepted_count = int(near_optimal["subset_size"])
 
-    near_optimal = build_relative_misfit_subset(result_table, min_misfit, near_optimal_ratio)
-    subset_table = near_optimal["subset_table"]
-    subset_mt = _result_table_to_mt(subset_table)
-
-    if subset_mt.shape[0] == 0:
-        max_pairwise_omega_deg = np.nan
-        grade = "C"
+    if candidate_count == 0:
+        misfit_rank_index = 0
+        misfit_min = np.nan
+        misfit_at_rank = np.nan
+        misfit_rank_ratio = np.nan
     else:
-        max_pairwise_omega_deg = _max_pairwise_omega_blocked(
-            subset_mt,
-            block_size=pairwise_block_size,
-            n_jobs=n_jobs,
-        )
-        if max_pairwise_omega_deg <= max_angle_deg_a:
-            grade = "A"
-        elif max_pairwise_omega_deg <= max_angle_deg_b:
-            grade = "B"
+        # Use a fixed low-error rank so this metric is not diluted by huge grids.
+        sorted_table = table[np.argsort(table[:, 6])]
+        misfit_rank_index = min(misfit_rank_count, candidate_count)
+        misfit_min = float(sorted_table[0, 6])
+        misfit_at_rank = float(sorted_table[misfit_rank_index - 1, 6])
+        misfit_rank_ratio = _relative_misfit_increase(misfit_at_rank, misfit_min)
+
+    if candidate_count == 0 or accepted_count == 0:
+        omega_p95_deg = np.nan
+        omega_max_deg = np.nan
+    else:
+        # The accepted ensemble is judged by its angular spread around the best model.
+        best_table = table[np.argsort(table[:, 6])][0:1]
+        reference_mt = _result_table_to_mt(best_table)[0]
+        accepted_mt = _result_table_to_mt(near_optimal["subset_table"])
+        omega_to_best = _omega_to_reference_deg(accepted_mt, reference_mt)
+        finite_omega = omega_to_best[np.isfinite(omega_to_best)]
+        if finite_omega.size == 0:
+            omega_p95_deg = np.nan
+            omega_max_deg = np.nan
         else:
-            grade = "C"
+            omega_p95_deg = float(np.percentile(finite_omega, 95.0))
+            omega_max_deg = float(np.max(finite_omega))
 
     return {
         "near_optimal_ratio": near_optimal_ratio,
-        "near_optimal_threshold": float(near_optimal["threshold"]),
-        "near_optimal_count": int(near_optimal["subset_size"]),
-        "max_pairwise_omega_deg": max_pairwise_omega_deg,
-        "consistency_grade": grade,
+        "accepted_threshold": float(near_optimal["threshold"]),
+        "accepted_count": accepted_count,
+        "candidate_count": candidate_count,
+        "misfit_rank_count": int(misfit_rank_count),
+        "misfit_rank_index": int(misfit_rank_index),
+        "misfit_min": misfit_min,
+        "misfit_at_rank": misfit_at_rank,
+        "misfit_rank_ratio": misfit_rank_ratio,
+        "omega_p95_deg": omega_p95_deg,
+        "omega_max_deg": omega_max_deg,
     }
 
 
 def grade_coverage(coverage):
+    """Grade geometry coverage using active azimuth and takeoff gaps only."""
     max_azi_gap = float(coverage["max_azi_gap_active"])
     max_takeoff_gap = float(coverage["max_takeoff_gap_active"])
 
@@ -501,55 +404,69 @@ def grade_coverage(coverage):
     return "C"
 
 
-def grade_count(counts):
-    min_active_count = int(counts["min_active_count"])
-
-    if min_active_count >= DEFAULT_QUALITY_CONFIG["count"]["A"]["min_active_each"]:
-        return "A"
-    if min_active_count >= DEFAULT_QUALITY_CONFIG["count"]["B"]["min_active_each"]:
-        return "B"
-    return "C"
-
-
 def grade_fit(fit):
-    misfit_mean_active = float(fit["misfit_mean_active"])
-    if misfit_mean_active <= DEFAULT_QUALITY_CONFIG["fit"]["A"]["max_mean_active"]:
+    """Grade fit with the best total misfit only."""
+    misfit_total = float(fit["misfit_total"])
+    if misfit_total <= DEFAULT_QUALITY_CONFIG["fit"]["A"]["max_total"]:
         return "A"
-    if misfit_mean_active <= DEFAULT_QUALITY_CONFIG["fit"]["B"]["max_mean_active"]:
+    if misfit_total <= DEFAULT_QUALITY_CONFIG["fit"]["B"]["max_total"]:
         return "B"
     return "C"
 
 
-def grade_overall(coverage_grade, count_grade, fit_grade, sharpness_grade, consistency_grade):
+def grade_misfit_sharpness(stability):
+    """Grade whether low-error models rise quickly away from the best model."""
+    misfit_rank_ratio = float(stability["misfit_rank_ratio"])
+    if misfit_rank_ratio >= DEFAULT_QUALITY_CONFIG["stability"]["A"]["min_misfit_rank_ratio"]:
+        return "A"
+    if misfit_rank_ratio >= DEFAULT_QUALITY_CONFIG["stability"]["B"]["min_misfit_rank_ratio"]:
+        return "B"
+    return "C"
+
+
+def grade_mechanism_consistency(stability):
+    """Grade whether accepted mechanisms cluster around the best model."""
+    omega_p95_deg = float(stability["omega_p95_deg"])
+    if omega_p95_deg <= DEFAULT_QUALITY_CONFIG["stability"]["A"]["max_omega_p95_deg"]:
+        return "A"
+    if omega_p95_deg <= DEFAULT_QUALITY_CONFIG["stability"]["B"]["max_omega_p95_deg"]:
+        return "B"
+    return "C"
+
+
+def grade_stability(stability):
+    """Combine misfit sharpness and mechanism consistency into stability."""
     if (
-        coverage_grade == "A"
-        and sharpness_grade == "A"
-        and consistency_grade == "A"
-        and count_grade != "C"
-        and fit_grade != "C"
+        stability["misfit_sharpness_grade"] == "A"
+        and stability["mechanism_consistency_grade"] == "A"
     ):
         return "A"
     if (
-        coverage_grade != "C"
-        and sharpness_grade != "C"
-        and consistency_grade != "C"
+        stability["misfit_sharpness_grade"] != "C"
+        and stability["mechanism_consistency_grade"] != "C"
     ):
         return "B"
     return "C"
 
 
-def build_quality_flags(coverage_grade, count_grade, fit_grade, sharpness_grade, consistency_grade):
+def grade_solution_quality(fit_grade, stability_grade, coverage_grade):
+    """Combine the three independent quality axes into one solution grade."""
+    if fit_grade == "A" and stability_grade == "A" and coverage_grade == "A":
+        return "A"
+    if fit_grade != "C" and stability_grade != "C" and coverage_grade != "C":
+        return "B"
+    return "C"
+
+
+def build_quality_flags(coverage_grade, fit_grade, stability_grade):
+    """Build concise flags for any axis that prevents a reliable solution."""
     flags = []
     if coverage_grade == "C":
         flags.append("low_coverage")
-    if count_grade == "C":
-        flags.append("low_observation_count")
     if fit_grade == "C":
         flags.append("high_misfit")
-    if sharpness_grade == "C":
-        flags.append("low_sharpness")
-    if consistency_grade == "C":
-        flags.append("low_consistency")
+    if stability_grade == "C":
+        flags.append("low_stability")
     return flags
 
 
@@ -587,69 +504,55 @@ def evaluate_solution_quality(
     Returns
     -------
     dict
-        Nested dictionary containing sub-grades, overall grade, raw metrics,
-        stability diagnostics, and the internally constructed result table.
+        Nested dictionary containing the solution grade, sub-grades, raw
+        metrics, and stability diagnostics.
     """
     config = DEFAULT_QUALITY_CONFIG
-    sharpness_config = config["sharpness"]
-    consistency_config = config["consistency"]
+    stability_config = config["stability"]
+    # Kept for API compatibility with existing inversion callers.
+    _ = consistency_n_jobs
 
     best_misfit = _as_misfit_row(best_misfit_row)
     all_result_table = _build_result_table(grid=grid, misfit_all=misfit_all, result_table=result_table)
 
+    # Counts remain useful diagnostics, but they are not part of solution quality.
     counts = compute_quality_counts(event, weight_list)
     coverage = compute_quality_coverage(event, weight_list)
     fit = compute_quality_fit(event, weight_list, best_misfit)
-    sharpness = evaluate_sharpness(
-        all_result_table,
-        low_error_count=sharpness_config["low_error_count"],
-        min_relative_span_a=sharpness_config["A"]["min_relative_span"],
-        min_relative_span_b=sharpness_config["B"]["min_relative_span"],
-    )
-    consistency = evaluate_consistency(
+    stability = compute_quality_stability(
         all_result_table,
         fit["misfit_total"],
-        near_optimal_ratio=consistency_config["near_optimal_ratio"],
-        max_angle_deg_a=consistency_config["A"]["max_angle_deg"],
-        max_angle_deg_b=consistency_config["B"]["max_angle_deg"],
-        n_jobs=consistency_n_jobs,
+        near_optimal_ratio=stability_config["near_optimal_ratio"],
+        misfit_rank_count=stability_config["misfit_rank_count"],
     )
+    stability["misfit_sharpness_grade"] = grade_misfit_sharpness(stability)
+    stability["mechanism_consistency_grade"] = grade_mechanism_consistency(stability)
 
     coverage_grade = grade_coverage(coverage)
-    count_grade = grade_count(counts)
     fit_grade = grade_fit(fit)
-    sharpness_grade = sharpness["sharpness_grade"]
-    consistency_grade = consistency["consistency_grade"]
-    overall_grade = grade_overall(
-        coverage_grade,
-        count_grade,
+    stability_grade = grade_stability(stability)
+    solution_quality = grade_solution_quality(
         fit_grade,
-        sharpness_grade,
-        consistency_grade,
+        stability_grade,
+        coverage_grade,
     )
 
     flags = build_quality_flags(
         coverage_grade,
-        count_grade,
         fit_grade,
-        sharpness_grade,
-        consistency_grade,
+        stability_grade,
     )
 
     return {
-        "overall_grade": overall_grade,
+        "solution_quality": solution_quality,
+        "overall_grade": solution_quality,
         "coverage_grade": coverage_grade,
-        "count_grade": count_grade,
         "fit_grade": fit_grade,
-        "sharpness_grade": sharpness_grade,
-        "consistency_grade": consistency_grade,
+        "stability_grade": stability_grade,
         "coverage": coverage,
         "counts": counts,
         "fit": fit,
-        "stability": {
-            "sharpness": sharpness,
-            "consistency": consistency,
-        },
+        "stability": stability,
         "flags": flags,
     }
 

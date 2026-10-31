@@ -104,27 +104,29 @@ def build_result_log_section(method, magnitude, misfit):
 
 
 def build_quality_log_section(quality):
+    """Format the catalog-oriented solution quality diagnostics."""
     flags = ", ".join(quality["flags"]) if quality["flags"] else "none"
     return _build_log_section("quality", [
-        ("quality.overall_grade", quality["overall_grade"], None),
+        ("quality.solution_quality", quality["solution_quality"], None),
         ("quality.coverage_grade", quality["coverage_grade"], None),
-        ("quality.count_grade", quality["count_grade"], None),
-        ("quality.consistency_grade", quality["consistency_grade"], None),
         ("quality.fit_grade", quality["fit_grade"], None),
-        ("quality.sharpness_grade", quality["sharpness_grade"], None),
+        ("quality.stability_grade", quality["stability_grade"], None),
         ("quality.coverage.max_azi_gap_active", quality["coverage"]["max_azi_gap_active"], 2),
         ("quality.coverage.max_takeoff_gap_active", quality["coverage"]["max_takeoff_gap_active"], 2),
-        ("quality.count.num_pol", quality["counts"]["num_pol"], None),
-        ("quality.count.num_amp", quality["counts"]["num_amp"], None),
-        ("quality.count.num_spr", quality["counts"]["num_spr"], None),
-        ("quality.count.min_active_count", quality["counts"]["min_active_count"], None),
+        ("quality.fit.misfit_total", quality["fit"]["misfit_total"], 6),
+        ("quality.fit.misfit_pol", quality["fit"]["misfit_pol"], 6),
+        ("quality.fit.misfit_amp", quality["fit"]["misfit_amp"], 6),
+        ("quality.fit.misfit_spr", quality["fit"]["misfit_spr"], 6),
         ("quality.fit.misfit_mean_active", quality["fit"]["misfit_mean_active"], 6),
-        ("quality.stability.sharpness.low_error_count", quality["stability"]["sharpness"]["low_error_count"], None),
-        ("quality.stability.sharpness.misfit_at_rank", quality["stability"]["sharpness"]["misfit_at_rank"], 6),
-        ("quality.stability.sharpness.relative_span", quality["stability"]["sharpness"]["relative_span"], 6),
-        ("quality.stability.consistency.near_optimal_ratio", quality["stability"]["consistency"]["near_optimal_ratio"], 4),
-        ("quality.stability.consistency.near_optimal_count", quality["stability"]["consistency"]["near_optimal_count"], None),
-        ("quality.stability.consistency.max_pairwise_omega_deg", quality["stability"]["consistency"]["max_pairwise_omega_deg"], 2),
+        ("quality.stability.misfit_rank_count", quality["stability"]["misfit_rank_count"], None),
+        ("quality.stability.misfit_rank_index", quality["stability"]["misfit_rank_index"], None),
+        ("quality.stability.misfit_at_rank", quality["stability"]["misfit_at_rank"], 6),
+        ("quality.stability.misfit_rank_ratio", quality["stability"]["misfit_rank_ratio"], 6),
+        ("quality.stability.near_optimal_ratio", quality["stability"]["near_optimal_ratio"], 4),
+        ("quality.stability.omega_p95_deg", quality["stability"]["omega_p95_deg"], 2),
+        ("quality.stability.omega_max_deg", quality["stability"]["omega_max_deg"], 2),
+        ("quality.stability.misfit_sharpness_grade", quality["stability"]["misfit_sharpness_grade"], None),
+        ("quality.stability.mechanism_consistency_grade", quality["stability"]["mechanism_consistency_grade"], None),
         ("quality.flags", flags, None),
     ])
 

@@ -70,6 +70,7 @@ def read_args():
     #-----------------------------#
 
     #-- graphics paramters --#
+    parser.add_argument("--no_plot", action="store_true", help="disable graphics output")
     parser.add_argument("--figtype",  default='png', type=str, help="filetype for graphics")
     parser.add_argument("--skipzero", action="store_true", help="skip zero observation in plot")
     parser.add_argument("--plot_station_names", action="store_true", help="If True, station names will be included in the beachball plot")

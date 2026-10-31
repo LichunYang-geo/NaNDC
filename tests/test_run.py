@@ -1,9 +1,9 @@
 import os
 
-event_list = "../examples/events.list"
-data_dir = "../examples/"
-vmodel = "../examples/velocity_example.nd"
-save_dir = "../results/"
+event_list = "../examples/msh/shots1.list"
+data_dir = "../examples/msh/input/ratio_snr_5f1-20/"
+vmodel = "../examples/msh/MSHvel.nd"
+save_dir = "../results/msh"
 
 inv_method = "FMT"
 weight_pol, weight_amp, weight_spr = 1, 1, 1
